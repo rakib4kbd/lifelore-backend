@@ -74,6 +74,32 @@ async function run() {
       }
     });
 
+    app.get("/api/lessons/featured", async (req, res) => {
+      try {
+        const featuredLessons = await database
+          .collection("lessons")
+          .find({ isFeatured: true })
+          .toArray();
+        res.json(featuredLessons);
+      } catch (error) {
+        console.error("Error fetching featured lessons:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.get("/api/lessons/public", async (req, res) => {
+      try {
+        const publicLessons = await database
+          .collection("lessons")
+          .find({ visibility: "public" })
+          .toArray();
+        res.json(publicLessons);
+      } catch (error) {
+        console.error("Error fetching public lessons:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
     app.get("/api/lessons/:id", async (req, res) => {
       try {
         const { id } = req.params;
@@ -142,6 +168,19 @@ async function run() {
       }
     });
 
+    app.get("/api/lessons/count/:creatorId", async (req, res) => {
+      try {
+        const { creatorId } = req.params;
+        const count = await database
+          .collection("lessons")
+          .countDocuments({ creatorId });
+        res.json({ count });
+      } catch (error) {
+        console.error("Error fetching lesson count:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
     app.get("/api/lessons/creator/:creatorId", async (req, res) => {
       try {
         const { creatorId } = req.params;
@@ -172,13 +211,10 @@ async function run() {
     app.patch("/api/users/:id", async (req, res) => {
       try {
         const { id } = req.params;
-        const { name, email, isPremium } = req.body;
+        const { isPremium } = req.body;
         const result = await database
           .collection("user")
-          .updateOne(
-            { _id: new ObjectId(id) },
-            { $set: { name, email, isPremium } },
-          );
+          .updateOne({ _id: new ObjectId(id) }, { $set: { isPremium } });
         if (result.matchedCount === 0) {
           return res.status(404).json({ message: "User not found" });
         }
