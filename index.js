@@ -51,7 +51,7 @@ async function run() {
       "Pinged your deployment. You successfully connected to MongoDB!",
     );
 
-    const database = client.db("mediqueue");
+    const database = client.db("lifelore");
 
     // app.use(cors);
     app.use(express.json());
@@ -74,6 +74,90 @@ async function run() {
       }
     });
 
+    app.get("/api/lessons/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const lesson = await database
+          .collection("lessons")
+          .findOne({ _id: new ObjectId(id) });
+        if (!lesson) {
+          return res.status(404).json({ message: "Lesson not found" });
+        }
+        res.json(lesson);
+      } catch (error) {
+        console.error("Error fetching lesson:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.post("/api/lessons", async (req, res) => {
+      try {
+        const {
+          title,
+          description,
+          category,
+          emotionalTone,
+          visibility,
+          accessLevel,
+          likes = [],
+          likesCount = 0,
+          isFeatured = false,
+          isReviewed = false,
+          creatorId,
+          creatorName,
+        } = req.body;
+
+        const lesson = {
+          title,
+          description,
+          category,
+          emotionalTone,
+          visibility,
+          accessLevel,
+
+          likes,
+          likesCount,
+          isFeatured,
+          isReviewed,
+          creatorId,
+          creatorName,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const result = await database.collection("lessons").insertOne(lesson);
+
+        res.status(201).json({
+          success: true,
+          insertedId: result.insertedId,
+          lesson,
+        });
+      } catch (error) {
+        console.error("Error creating lesson:", error);
+
+        res.status(500).json({
+          success: false,
+          message: "Internal Server Error",
+        });
+      }
+    });
+
+    app.get("/api/lessons/creator/:creatorId", async (req, res) => {
+      try {
+        const { creatorId } = req.params;
+        const lessons = await database
+          .collection("lessons")
+          .find({ creatorId })
+          .toArray();
+
+        res.json(lessons);
+        console.log("backend", lessons);
+      } catch (error) {
+        console.error("Error fetching lessons:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
     // fetch all users
     app.get("/api/users", async (req, res) => {
       try {
@@ -88,7 +172,7 @@ async function run() {
     app.patch("/api/users/:id", async (req, res) => {
       try {
         const { id } = req.params;
-        const { name, email } = req.body;
+        const { name, email, isPremium } = req.body;
         const result = await database
           .collection("user")
           .updateOne(
