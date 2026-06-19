@@ -110,6 +110,8 @@ async function run() {
         const featuredLessons = await database
           .collection("lessons")
           .find({ isFeatured: true })
+          .sort({ favouritesCount: -1 })
+          .limit(6)
           .toArray();
         res.json(featuredLessons);
       } catch (error) {
@@ -217,6 +219,22 @@ async function run() {
         });
       } catch (error) {
         console.error("Error updating favourites:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.post("/api/lessons/report", async (req, res) => {
+      try {
+        const { lessonId, userId, reason } = req.body;
+        const report = await database.collection("lessonReports").insertOne({
+          lessonId,
+          userId,
+          reason,
+          createdAt: new Date(),
+        });
+        res.status(200).json({ message: "Lesson reported successfully" });
+      } catch (error) {
+        console.error("Error reporting lesson:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -377,6 +395,7 @@ async function run() {
             $project: {
               name: 1,
               email: 1,
+              image: 1,
               totalLessons: {
                 $size: "$lessons",
               },
