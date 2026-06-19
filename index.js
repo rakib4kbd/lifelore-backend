@@ -74,6 +74,37 @@ async function run() {
       }
     });
 
+    app.get("/api/lessons/favourite", async (req, res) => {
+      const { sort } = req.query || null;
+      if (sort) {
+        try {
+          const lessons = await database
+            .collection("lessons")
+            .find({ favouritesCount: { $gt: 0 } })
+            .sort({
+              favouritesCount: sort === "desc" ? -1 : 1,
+            })
+            .toArray();
+          res.json(lessons);
+        } catch (error) {
+          console.error("Error fetching lessons:", error);
+          res.status(500).json({ message: "Internal Server Error" });
+        }
+      }
+
+      try {
+        const lessons = await database
+          .collection("lessons")
+          .find({ favouritesCount: { $gt: 0 } })
+
+          .toArray();
+        res.json(lessons);
+      } catch (error) {
+        console.error("Error fetching lessons:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
     app.get("/api/lessons/featured", async (req, res) => {
       try {
         const featuredLessons = await database
@@ -125,16 +156,22 @@ async function run() {
           return res.status(404).json({ message: "Lesson not found" });
         }
 
+        const likesCount = lesson.likes?.length || 0;
         const isLiked = lesson.likes?.includes(userId);
+        console.log(likesCount, isLiked);
 
-        const result = await database
-          .collection("lessons")
-          .updateOne(
-            { _id: new ObjectId(lessonId) },
-            isLiked
-              ? { $pull: { likes: userId } }
-              : { $addToSet: { likes: userId } },
-          );
+        const result = await database.collection("lessons").updateOne(
+          { _id: new ObjectId(lessonId) },
+          isLiked
+            ? {
+                $pull: { likes: userId },
+                $set: { likesCount: likesCount - 1 },
+              }
+            : {
+                $addToSet: { likes: userId },
+                $set: { likesCount: likesCount + 1 },
+              },
+        );
 
         res.status(200).json({
           message: isLiked ? "Removed Like from lesson" : "Liked the lesson",
@@ -157,16 +194,21 @@ async function run() {
           return res.status(404).json({ message: "Lesson not found" });
         }
 
+        const favouritesCount = lesson.favourites?.length || 0;
         const isFavourite = lesson.favourites?.includes(userId);
 
-        const result = await database
-          .collection("lessons")
-          .updateOne(
-            { _id: new ObjectId(lessonId) },
-            isFavourite
-              ? { $pull: { favourites: userId } }
-              : { $addToSet: { favourites: userId } },
-          );
+        const result = await database.collection("lessons").updateOne(
+          { _id: new ObjectId(lessonId) },
+          isFavourite
+            ? {
+                $pull: { favourites: userId },
+                $set: { favouritesCount: favouritesCount - 1 },
+              }
+            : {
+                $addToSet: { favourites: userId },
+                $set: { favouritesCount: favouritesCount + 1 },
+              },
+        );
 
         res.status(200).json({
           message: isFavourite
