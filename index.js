@@ -100,6 +100,85 @@ async function run() {
       }
     });
 
+    app.get("/api/lessons/favourite", async (req, res) => {
+      try {
+        const favouriteLessons = await database
+          .collection("lessons")
+          .find({ favourites: { $exists: true, $ne: [] } })
+          .toArray();
+        res.json(favouriteLessons);
+      } catch (error) {
+        console.error("Error fetching favourite lessons:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.post("/api/lessons/like", async (req, res) => {
+      const { lessonId, userId } = req.body;
+
+      try {
+        const lesson = await database.collection("lessons").findOne({
+          _id: new ObjectId(lessonId),
+        });
+
+        if (!lesson) {
+          return res.status(404).json({ message: "Lesson not found" });
+        }
+
+        const isLiked = lesson.likes?.includes(userId);
+
+        const result = await database
+          .collection("lessons")
+          .updateOne(
+            { _id: new ObjectId(lessonId) },
+            isLiked
+              ? { $pull: { likes: userId } }
+              : { $addToSet: { likes: userId } },
+          );
+
+        res.status(200).json({
+          message: isLiked ? "Removed Like from lesson" : "Liked the lesson",
+        });
+      } catch (error) {
+        console.error("Error updating likes:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.post("/api/lessons/favourite", async (req, res) => {
+      const { lessonId, userId } = req.body;
+
+      try {
+        const lesson = await database.collection("lessons").findOne({
+          _id: new ObjectId(lessonId),
+        });
+
+        if (!lesson) {
+          return res.status(404).json({ message: "Lesson not found" });
+        }
+
+        const isFavourite = lesson.favourites?.includes(userId);
+
+        const result = await database
+          .collection("lessons")
+          .updateOne(
+            { _id: new ObjectId(lessonId) },
+            isFavourite
+              ? { $pull: { favourites: userId } }
+              : { $addToSet: { favourites: userId } },
+          );
+
+        res.status(200).json({
+          message: isFavourite
+            ? "Lesson removed from favourites"
+            : "Lesson added to favourites",
+        });
+      } catch (error) {
+        console.error("Error updating favourites:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
     app.get("/api/lessons/:id", async (req, res) => {
       try {
         const { id } = req.params;
@@ -212,13 +291,14 @@ async function run() {
       try {
         const { id } = req.params;
         const { isPremium } = req.body;
+        console.log(req.params);
         const result = await database
           .collection("user")
           .updateOne({ _id: new ObjectId(id) }, { $set: { isPremium } });
         if (result.matchedCount === 0) {
           return res.status(404).json({ message: "User not found" });
         }
-        res.json({ message: "User updated successfully" });
+        res.status(200).json({ message: "User updated successfully" });
       } catch (error) {
         console.error("Error updating user:", error);
         res.status(500).json({ message: "Internal Server Error" });
