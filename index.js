@@ -329,6 +329,70 @@ async function run() {
       }
     });
 
+    app.get("/api/usersWithLessonCount", async (req, res) => {
+      const usersWithLessonCount = await database
+        .collection("user")
+        .aggregate([
+          {
+            $addFields:
+              /**
+               * newField: The new field name.
+               * expression: The new field expression.
+               */
+              {
+                userIdString: {
+                  $toString: "$_id",
+                },
+              },
+          },
+          {
+            $lookup:
+              /**
+               * from: The target collection.
+               * localField: The local join field.
+               * foreignField: The target join field.
+               * as: The name for the results.
+               * pipeline: Optional pipeline to run on the foreign collection.
+               * let: Optional variables to use in the pipeline field stages.
+               */
+              {
+                from: "lessons",
+                localField: "userIdString",
+                foreignField: "creatorId",
+                as: "lessons",
+              },
+          },
+          {
+            $match:
+              /**
+               * query: The query in MQL.
+               */
+              {
+                createdAt: {
+                  $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+                },
+              },
+          },
+          {
+            $project: {
+              name: 1,
+              email: 1,
+              totalLessons: {
+                $size: "$lessons",
+              },
+            },
+          },
+          {
+            $match: {
+              totalLessons: { $gt: 0 },
+            },
+          },
+        ])
+        .sort({ totalLessons: -1 })
+        .toArray();
+      res.json(usersWithLessonCount);
+    });
+
     app.patch("/api/users/:id", async (req, res) => {
       try {
         const { id } = req.params;
