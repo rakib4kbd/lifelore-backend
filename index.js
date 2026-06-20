@@ -4,6 +4,7 @@ const { MongoClient, ServerApiVersion } = require("mongodb");
 const dotenv = require("dotenv");
 const { ObjectId } = require("mongodb");
 const { createRemoteJWKSet, jwtVerify } = require("jose-cjs");
+const { includes } = require("better-auth");
 
 dotenv.config();
 const dbUri = process.env.MONGODB_URL;
@@ -101,6 +102,28 @@ async function run() {
         res.json(lessons);
       } catch (error) {
         console.error("Error fetching lessons:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    // admin validation
+    app.get("/api/lessons/count", async (req, res) => {
+      const lessonCount = await database
+        .collection("lessons")
+        .countDocuments({ visibility: "public" });
+      res.json(lessonCount);
+    });
+
+    app.get("/api/lessons/favourite/:userId", async (req, res) => {
+      const { userId } = req.params;
+      try {
+        const lessons = await database
+          .collection("lessons")
+          .find({ favourites: { $in: [userId] } })
+          .toArray();
+        res.json(lessons);
+      } catch (error) {
+        console.error("Error fetching favourite lessons:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -223,6 +246,124 @@ async function run() {
       }
     });
 
+    app.get("/api/admin/overview", async (req, res) => {
+      try {
+        const totalPublicLessons = await database
+          .collection("lessons")
+          .countDocuments({ visibility: "public" });
+        const totalUsers = await database.collection("user").countDocuments();
+        const totalReportedLessons = await database
+          .collection("lessonReports")
+          .countDocuments();
+        const mostActiveUsers = await database
+          .collection("user")
+          .aggregate([
+            {
+              $addFields: {
+                userIdString: { $toString: "$_id" },
+              },
+            },
+            {
+              $lookup: {
+                from: "lessons",
+                localField: "userIdString",
+                foreignField: "creatorId",
+                as: "createdLessons",
+              },
+            },
+            {
+              $addFields: {
+                lessonCount: { $size: "$createdLessons" },
+              },
+            },
+            {
+              $sort: { lessonCount: -1 },
+            },
+            {
+              $project: {
+                createdLessons: 0,
+              },
+            },
+            {
+              $limit: 3,
+            },
+          ])
+          .toArray();
+
+        const todaysLesson = await database
+          .collection("lessons")
+          .countDocuments({
+            createdAt: {
+              $gte: new Date(new Date().setHours(0, 0, 0, 0)),
+              $lt: new Date(new Date().setHours(23, 59, 59, 999)),
+            },
+          });
+
+        const userGrowthData = await database
+          .collection("user")
+          .aggregate([
+            {
+              $group: {
+                _id: {
+                  $dateToString: {
+                    format: "%Y-%m-%d",
+                    date: "$createdAt",
+                  },
+                },
+                users: { $sum: 1 },
+              },
+            },
+            { $sort: { _id: 1 } },
+            {
+              $project: {
+                _id: 0,
+                date: "$_id",
+                users: 1,
+              },
+            },
+          ])
+          .toArray();
+
+        const lessonGrowthData = await database
+          .collection("lessons")
+          .aggregate([
+            {
+              $group: {
+                _id: {
+                  $dateToString: {
+                    format: "%Y-%m-%d",
+                    date: "$createdAt",
+                  },
+                },
+                lessons: { $sum: 1 },
+              },
+            },
+            { $sort: { _id: 1 } },
+            {
+              $project: {
+                _id: 0,
+                date: "$_id",
+                lessons: 1,
+              },
+            },
+          ])
+          .toArray();
+
+        res.json({
+          totalPublicLessons,
+          totalUsers,
+          totalReportedLessons,
+          todaysLesson,
+          mostActiveUsers,
+          userGrowthData,
+          lessonGrowthData,
+        });
+      } catch (error) {
+        console.error("Error fetching admin overview:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
     app.post("/api/lessons/report", async (req, res) => {
       try {
         const { lessonId, userId, reason } = req.body;
@@ -235,6 +376,80 @@ async function run() {
         res.status(200).json({ message: "Lesson reported successfully" });
       } catch (error) {
         console.error("Error reporting lesson:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.post("/api/lessons/comments", async (req, res) => {
+      try {
+        const { lessonId, userId, text } = req.body;
+        const comment = {
+          lessonId,
+          userId,
+          text,
+          createdAt: new Date(),
+        };
+        const result = await database.collection("comments").insertOne(comment);
+        res
+          .status(201)
+          .json({ success: true, insertedId: result.insertedId, comment });
+      } catch (error) {
+        console.error("Error creating comment:", error);
+        res
+          .status(500)
+          .json({ success: false, message: "Internal Server Error" });
+      }
+    });
+
+    app.get("/api/lessons/comments/:lessonId", async (req, res) => {
+      try {
+        const { lessonId } = req.params;
+        const comments = await database
+          .collection("comments")
+          .aggregate([
+            {
+              $addFields: {
+                userObjectId: {
+                  $toObjectId: "$userId",
+                },
+              },
+            },
+            {
+              $lookup: {
+                from: "user",
+                localField: "userObjectId",
+                foreignField: "_id",
+                as: "user",
+              },
+            },
+            {
+              $addFields: {
+                userName: { $arrayElemAt: ["$user.name", 0] },
+                userImage: { $arrayElemAt: ["$user.image", 0] },
+              },
+            },
+            {
+              $match: {
+                lessonId: lessonId,
+              },
+            },
+            {
+              $project: {
+                _id: 1,
+                userId: 1,
+                lessonId: 1,
+                text: 1,
+                createdAt: 1,
+                userName: 1,
+                userImage: 1,
+              },
+            },
+          ])
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.json(comments);
+      } catch (error) {
+        console.error("Error fetching comments:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -392,18 +607,15 @@ async function run() {
               },
           },
           {
-            $project: {
-              name: 1,
-              email: 1,
-              image: 1,
+            $addFields: {
               totalLessons: {
                 $size: "$lessons",
               },
             },
           },
           {
-            $match: {
-              totalLessons: { $gt: 0 },
+            $project: {
+              lessons: 0,
             },
           },
         ])
@@ -412,21 +624,62 @@ async function run() {
       res.json(usersWithLessonCount);
     });
 
+    // admin validation
+    app.get("/api/users/count", async (req, res) => {
+      try {
+        const count = await database.collection("user").countDocuments();
+        res.json(count);
+      } catch (error) {
+        console.error("Error fetching user count:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.delete("/api/users/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const result = await database
+          .collection("user")
+          .deleteOne({ _id: new ObjectId(id) });
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ message: "User not found" });
+        }
+        return res.status(200).json({ message: "User deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting user:", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
     app.patch("/api/users/:id", async (req, res) => {
       try {
         const { id } = req.params;
-        const { isPremium } = req.body;
-        console.log(req.params);
+        const updates = req.body;
+
+        // remove undefined fields (critical fix)
+        const setData = Object.fromEntries(
+          Object.entries(updates).filter(([_, value]) => value !== undefined),
+        );
+
+        if (Object.keys(setData).length === 0) {
+          return res.status(400).json({ message: "No valid fields provided" });
+        }
+
         const result = await database
           .collection("user")
-          .updateOne({ _id: new ObjectId(id) }, { $set: { isPremium } });
+          .updateOne({ _id: new ObjectId(id) }, { $set: setData });
+
         if (result.matchedCount === 0) {
           return res.status(404).json({ message: "User not found" });
         }
-        res.status(200).json({ message: "User updated successfully" });
+
+        return res.status(200).json({
+          message: "User updated successfully",
+          updatedFields: setData,
+        });
       } catch (error) {
         console.error("Error updating user:", error);
-        res.status(500).json({ message: "Internal Server Error" });
+        return res.status(500).json({ message: "Internal Server Error" });
       }
     });
 
