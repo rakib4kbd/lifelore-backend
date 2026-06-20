@@ -874,6 +874,40 @@ async function run() {
       }
     });
 
+    app.get("/api/users/:id", async (req, res) => {
+      const { id } = await req.params;
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({ message: "Invalid user ID" });
+      }
+
+      const user = await database
+        .collection("user")
+        .aggregate([
+          {
+            $match: {
+              _id: new ObjectId(id),
+            },
+          },
+          {
+            $addFields: {
+              userIdString: {
+                $toString: "$_id",
+              },
+            },
+          },
+          {
+            $lookup: {
+              from: "lessons",
+              localField: "userIdString",
+              foreignField: "creatorId",
+              as: "lessons",
+            },
+          },
+        ])
+        .toArray();
+      res.json(user[0]);
+    });
+
     app.delete("/api/users/:id", async (req, res) => {
       try {
         const { id } = req.params;
