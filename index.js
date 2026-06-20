@@ -364,6 +364,225 @@ async function run() {
       }
     });
 
+    app.get("/api/admin/lessons", async (req, res) => {
+      const publicLessonCount = await database
+        .collection("lessons")
+        .countDocuments({ visibility: "public" });
+      const privateLessonCount = await database
+        .collection("lessons")
+        .countDocuments({ visibility: "private" });
+      const reportedLessonCount = await database
+        .collection("lessonReports")
+        .aggregate([
+          {
+            $group: {
+              _id: "$lessonId",
+            },
+          },
+          {
+            $count: "reportedLessonCount",
+          },
+        ])
+        .toArray();
+      const allLessons = await database.collection("lessons").find().toArray();
+
+      res.json({
+        publicLessonCount: publicLessonCount,
+        privateLessonCount: privateLessonCount,
+        reportedLessonCount:
+          reportedLessonCount.length > 0
+            ? reportedLessonCount[0].reportedLessonCount
+            : 0,
+        allLessons: allLessons,
+      });
+    });
+
+    app.patch("/api/admin/lessons/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const lesson = await database.collection("lessons").findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!lesson) {
+          return res.status(404).json({
+            message: "Lesson not found",
+          });
+        }
+
+        const updates = Object.fromEntries(
+          Object.entries(req.body).filter(([_, value]) => value !== undefined),
+        );
+
+        if (Object.keys(updates).length === 0) {
+          return res.status(400).json({
+            message: "No valid fields provided",
+          });
+        }
+
+        const result = await database.collection("lessons").updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: updates,
+          },
+        );
+
+        return res.status(200).json({
+          message: "Lesson updated successfully",
+          updatedFields: updates,
+          modifiedCount: result.modifiedCount,
+        });
+      } catch (error) {
+        console.error("Error updating lesson:", error);
+
+        return res.status(500).json({
+          message: "Internal Server Error",
+        });
+      }
+    });
+
+    app.get("/api/lessons/report", async (req, res) => {
+      try {
+        const reports = await database
+          .collection("lessonReports")
+          .aggregate([
+            {
+              $addFields: {
+                lessonIdObject: {
+                  $toObjectId: "$lessonId",
+                },
+                userIdObject: {
+                  $toObjectId: "$userId",
+                },
+              },
+            },
+            {
+              $lookup: {
+                from: "lessons",
+                localField: "lessonIdObject",
+                foreignField: "_id",
+                as: "lessons",
+              },
+            },
+            {
+              $lookup: {
+                from: "user",
+                localField: "userIdObject",
+                foreignField: "_id",
+                as: "user",
+              },
+            },
+            {
+              $addFields: {
+                lesson: {
+                  $arrayElemAt: ["$lessons", 0],
+                },
+                user: {
+                  $arrayElemAt: ["$user", 0],
+                },
+              },
+            },
+            {
+              $project: {
+                lessonIdObject: 0,
+                userIdObject: 0,
+              },
+            },
+          ])
+          .toArray();
+        res.json(reports);
+      } catch (error) {
+        console.error("Error fetching lesson reports:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.get("/api/lessons/report/:lessonId", async (req, res) => {
+      try {
+        const { lessonId } = req.params;
+
+        const reports = await database
+          .collection("lessonReports")
+          .aggregate([
+            // 1. Get all reports for this specific lesson
+            {
+              $match: {
+                lessonId: lessonId,
+              },
+            },
+            // 2. Safely cast both userId string and lessonId string to ObjectIds
+            {
+              $addFields: {
+                userObjId: {
+                  $convert: { input: "$userId", to: "objectId", onError: null },
+                },
+                lessonObjId: {
+                  $convert: {
+                    input: "$lessonId",
+                    to: "objectId",
+                    onError: null,
+                  },
+                },
+              },
+            },
+            // 3. Lookup the reporting user details
+            {
+              $lookup: {
+                from: "user", // Change to "users" if your collection is plural
+                localField: "userObjId",
+                foreignField: "_id",
+                as: "userInfo",
+              },
+            },
+            // 4. Lookup the target lesson details
+            {
+              $lookup: {
+                from: "lessons", // Change to match your actual lessons collection name
+                localField: "lessonObjId",
+                foreignField: "_id",
+                as: "lessonInfo",
+              },
+            },
+            // 5. Flatten both arrays into clean single objects
+            {
+              $addFields: {
+                userInfo: { $first: "$userInfo" },
+                lessonInfo: { $first: "$lessonInfo" },
+              },
+            },
+            // 6. Secure response data and clean temporary fields
+            {
+              $project: {
+                userObjId: 0,
+                lessonObjId: 0,
+                "userInfo.password": 0, // Strip out credentials for safety
+                "userInfo.salt": 0,
+              },
+            },
+          ])
+          .toArray();
+        console.log(reports);
+        res.json(reports);
+      } catch (error) {
+        console.error("Error fetching lesson reports:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.delete("/api/lessons/report/:lessonId", async (req, res) => {
+      try {
+        const { lessonId } = req.params;
+        const result = await database
+          .collection("lessonReports")
+          .deleteMany({ lessonId });
+        res.json({ message: "Lesson reports deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting lesson reports:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
     app.post("/api/lessons/report", async (req, res) => {
       try {
         const { lessonId, userId, reason } = req.body;
@@ -466,6 +685,26 @@ async function run() {
         res.json(lesson);
       } catch (error) {
         console.error("Error fetching lesson:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.delete("/api/lessons/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        console.log("delete", id);
+        const result = await database
+          .collection("lessons")
+          .deleteOne({ _id: new ObjectId(id) });
+        const deleteLessonReportsResult = await database
+          .collection("lessonReports")
+          .deleteMany({ lessonId: id });
+        res.json({
+          message: "Lesson deleted successfully",
+          deleteLessonReportsResult,
+        });
+      } catch (error) {
+        console.error("Error deleting lesson:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
