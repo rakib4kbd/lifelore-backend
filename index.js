@@ -1,10 +1,10 @@
-const express = require("express");
-const cors = require("cors");
-const { MongoClient, ServerApiVersion } = require("mongodb");
-const dotenv = require("dotenv");
-const { ObjectId } = require("mongodb");
-const { createRemoteJWKSet, jwtVerify } = require("jose-cjs");
-const { includes } = require("better-auth");
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+
+import { MongoClient, ServerApiVersion, ObjectId } from "mongodb";
+import { createRemoteJWKSet, jwtVerify } from "jose-cjs";
+// import { includes } from "better-auth";
 
 dotenv.config();
 const dbUri = process.env.MONGODB_URL;
@@ -374,7 +374,7 @@ async function run() {
       try {
         const totalPublicLessons = await database
           .collection("lessons")
-          .countDocuments({ visibility: "public" });
+          .countDocuments({ visibility: "Public" });
         const totalUsers = await database.collection("user").countDocuments();
         const totalReportedLessons = await database
           .collection("lessonReports")
@@ -861,6 +861,22 @@ async function run() {
         res.json(comments);
       } catch (error) {
         console.error("Error fetching comments:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.delete("/api/lessons/comments/:commentId", async (req, res) => {
+      try {
+        const { commentId } = req.params;
+        const result = await database
+          .collection("comments")
+          .deleteOne({ _id: new ObjectId(commentId) });
+        if (!result.deletedCount) {
+          return res.status(404).json({ message: "Comment not found" });
+        }
+        res.json({ message: "Comment deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting comment:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
