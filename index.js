@@ -88,7 +88,7 @@ async function run() {
       try {
         const query = { favouritesCount: { $gt: 0 } };
 
-        const cursor = database.collection("lessons").find(query);
+        const cursor = database.collection("lessons").find(query).limit(5);
 
         if (sort) {
           cursor.sort({
@@ -855,7 +855,7 @@ async function run() {
             },
             {
               $addFields: {
-                userName: { $arrayElemAt: ["$user.name", 0] },
+                userName: { $arrayElemAt: ["$user?.name", 0] },
                 userImage: { $arrayElemAt: ["$user.image", 0] },
               },
             },
@@ -1045,54 +1045,49 @@ async function run() {
       }
     });
 
-    app.get(
-      "/api/usersWithLessonCount",
-      verifyToken,
-      requireAdmin,
-      async (req, res) => {
-        const usersWithLessonCount = await database
-          .collection("user")
-          .aggregate([
-            {
-              $addFields: {
-                userIdString: {
-                  $toString: "$_id",
-                },
+    app.get("/api/usersWithLessonCount", async (req, res) => {
+      const usersWithLessonCount = await database
+        .collection("user")
+        .aggregate([
+          {
+            $addFields: {
+              userIdString: {
+                $toString: "$_id",
               },
             },
-            {
-              $lookup: {
-                from: "lessons",
-                localField: "userIdString",
-                foreignField: "creatorId",
-                as: "lessons",
+          },
+          {
+            $lookup: {
+              from: "lessons",
+              localField: "userIdString",
+              foreignField: "creatorId",
+              as: "lessons",
+            },
+          },
+          {
+            $match: {
+              createdAt: {
+                $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
               },
             },
-            {
-              $match: {
-                createdAt: {
-                  $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-                },
+          },
+          {
+            $addFields: {
+              totalLessons: {
+                $size: "$lessons",
               },
             },
-            {
-              $addFields: {
-                totalLessons: {
-                  $size: "$lessons",
-                },
-              },
+          },
+          {
+            $project: {
+              lessons: 0,
             },
-            {
-              $project: {
-                lessons: 0,
-              },
-            },
-          ])
-          .sort({ totalLessons: -1 })
-          .toArray();
-        res.json(usersWithLessonCount);
-      },
-    );
+          },
+        ])
+        .sort({ totalLessons: -1 })
+        .toArray();
+      res.json(usersWithLessonCount);
+    });
 
     app.get("/api/users/count", verifyToken, requireAdmin, async (req, res) => {
       try {
